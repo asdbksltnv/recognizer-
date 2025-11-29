@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR Book Experience</title>
+    
+    <!-- A-Frame 1.5.0 -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <!-- MindAR Image Tracking 1.2.5 -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a1a;
+            touch-action: none; 
+        }
+
+        /* --- UI Overlay Layer --- */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* --- Start Screen (Blocker) --- */
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            pointer-events: auto;
+            transition: opacity 0.5s ease-out, visibility 0.5s;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none !important;
+        }
+
+        h1 {
+            color: #ffffff;
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        p {
+            color: #cbd5e1;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+
+        /* --- Buttons --- */
+        .btn {
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        /* --- HUD (Heads Up Display) --- */
+        .hud-top {
+            padding: 20px;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .status-pill {
+            display: inline-block;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .status-pill.found {
+            background: rgba(34, 197, 94, 0.8); /* Green */
+            border-color: #4ade80;
+        }
+
+        .status-pill.error {
+            background: rgba(239, 68, 68, 0.8); /* Red */
+            border-color: #f87171;
+        }
+
+        /* --- Scanning Frame Guide --- */
+        .scan-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70vw;
+            height: 70vw;
+            max-width: 400px;
+            max-height: 400px;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.3); /* Dim background */
+            transition: border-color 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .scan-guide.active {
+            border-color: #4ade80;
+            box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0); /* Remove dim when found */
+            border-style: solid;
+            border-width: 4px;
+        }
+
+        /* Error Modal */
+        #error-modal {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            display: none;
+            width: 80%;
+            text-align: center;
+            font-size: 0.9rem;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer">
+        <div class="hud-top">
+            <div id="status-pill" class="status-pill">Searching for target...</div>
+        </div>
+        <div id="scan-guide" class="scan-guide"></div>
+        <div id="error-modal">
+            Camera access denied or not supported. Please check browser permissions.
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen">
+        <h1>AR Book Experience</h1>
+        <p>Point your camera at your book page to start.</p>
+        <button id="start-btn" class="btn">Start Camera</button>
+        <p style="font-size: 0.8rem; margin-top: 20px; opacity: 0.7;">Requires Camera Permissions</p>
+    </div>
+
+    <!-- AR Scene -->
+    <!-- 
+        UPDATED: imageTargetSrc now points to your local file in the 'assets' folder
+        ./assets/targets.mind
+    -->
+    <a-scene 
+        mindar-image="imageTargetSrc: ./assets/targets.mind; uiScanning: no; filterMinCF:0.0001; filterBeta: 0.001;" 
+        color-space="sRGB" 
+        renderer="colorManagement: true, sortObjects: true" 
+        vr-mode-ui="enabled: false" 
+        device-orientation-permission-ui="enabled: false">
+
+        <!-- Asset Management -->
+        <a-assets>
+            <!-- 
+                UPDATED: Video source now points to local file
+                ./assets/video.mp4
+            -->
+            <video id="vid" 
+                src="./assets/video.mp4"
+                preload="auto" 
+                response-type="arraybuffer" 
+                loop 
+                crossorigin="anonymous" 
+                webkit-playsinline 
+                playsinline 
+                muted>
+            </video>
+            
+            <!-- UPDATED: Poster image source now points to local file -->
+            <img id="card-img" src="./assets/poster.png" crossorigin="anonymous" />
+        </a-assets>
+
+        <!-- Camera -->
+        <a-camera position="0 0 0" look-controls="enabled: false" cursor="fuse: false; rayOrigin: mouse;" raycaster="far: 10000; objects: .clickable"></a-camera>
+
+        <!-- AR Target (Index 0) -->
+        <a-entity mindar-image-target="targetIndex: 0" id="target-entity">
+            
+            <!-- Video Plane -->
+            <a-plane 
+                id="video-plane"
+                src="#vid" 
+                material="shader: flat; src: #vid"
+                position="0 0 0" 
+                height="0.552" 
+                width="1" 
+                rotation="0 0 0"
+                class="clickable">
+            </a-plane>
+
+            <!-- Decorative Frame -->
+            <a-plane position="0 0 -0.01" height="0.6" width="1.05" color="#ffffff" material="shader: flat; opacity: 0.5"></a-plane>
+
+            <!-- Floating Label -->
+            <a-text 
+                value="Interactive Video" 
+                color="#ffffff" 
+                align="center" 
+                position="0 -0.4 0.05" 
+                scale="0.3 0.3 0.3"
+                font="kelsonsans"
+                width="4">
+            </a-text>
+
+        </a-entity>
+    </a-scene>
+
+    <script>
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const statusPill = document.getElementById('status-pill');
+        const scanGuide = document.getElementById('scan-guide');
+        const errorModal = document.getElementById('error-modal');
+        const video = document.getElementById('vid');
+        const targetEntity = document.getElementById('target-entity');
+        const sceneEl = document.querySelector('a-scene');
+
+        // --- 1. User Interaction (Start Button) ---
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Unlock iOS Audio
+                await video.play();
+                video.pause();
+                video.currentTime = 0;
+                
+                // Unmute explicitly after interaction
+                video.muted = false;
+                
+                startScreen.classList.add('hidden');
+                statusPill.innerText = "Initializing Camera...";
+                
+            } catch (err) {
+                console.warn("Video autoplay prevented:", err);
+                startScreen.classList.add('hidden');
+            }
+        });
+
+        // --- 2. MindAR Events ---
+        targetEntity.addEventListener("targetFound", event => {
+            console.log("Target Found");
+            statusPill.innerText = "Target Detected";
+            statusPill.classList.add('found');
+            scanGuide.classList.add('active');
+            
+            video.play();
+        });
+
+        targetEntity.addEventListener("targetLost", event => {
+            console.log("Target Lost");
+            statusPill.innerText = "Searching...";
+            statusPill.classList.remove('found');
+            scanGuide.classList.remove('active');
+            
+            video.pause();
+        });
+
+        // --- 3. Error Handling ---
+        sceneEl.addEventListener("arError", (event) => {
+            console.error("MindAR Error:", event);
+            errorModal.style.display = 'block';
+            statusPill.innerText = "Error";
+            statusPill.classList.add('error');
+        });
+    </script>
+</body>
+</html>
